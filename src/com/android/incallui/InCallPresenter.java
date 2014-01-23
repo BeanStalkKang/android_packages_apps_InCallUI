@@ -16,11 +16,13 @@
 
 package com.android.incallui;
 
+import com.android.incallui.service.PhoneNumberService;
 import com.google.android.collect.Sets;
 import com.google.common.base.Preconditions;
 
 import android.content.Context;
 import android.content.Intent;
+import android.os.PowerManager;
 
 import com.android.services.telephony.common.Call;
 import com.android.services.telephony.common.Call.Capabilities;
@@ -51,6 +53,7 @@ public class InCallPresenter implements CallList.Listener {
     private Context mContext;
     private CallList mCallList;
     private InCallActivity mInCallActivity;
+    private InCallCardActivity mInCallCardActivity;
     private InCallState mInCallState = InCallState.NO_CALLS;
     private AccelerometerListener mAccelerometerListener;
     private ProximitySensor mProximitySensor;
@@ -131,12 +134,22 @@ public class InCallPresenter implements CallList.Listener {
     }
 
     private void attemptFinishActivity() {
+        // Finish our presenter card in all cases, we won't need it anymore whatever might
+        // happen.
+        if (mInCallCardActivity != null) {
+            mInCallCardActivity.finish();
+        }
+
         final boolean doFinish = (mInCallActivity != null && isActivityStarted());
         Log.i(this, "Hide in call UI: " + doFinish);
 
         if (doFinish) {
             mInCallActivity.finish();
         }
+    }
+
+    public void setCardActivity(InCallCardActivity inCallCardActivity) {
+        mInCallCardActivity = inCallCardActivity;
     }
 
     /**
@@ -231,7 +244,7 @@ public class InCallPresenter implements CallList.Listener {
         // Renable notification shade and soft navigation buttons, if we are no longer in the
         // incoming call screen
         if (!newState.isIncoming()) {
-            if(mAccelerometerListener != null){
+            if (mAccelerometerListener != null) {
                 mAccelerometerListener.enableSensor(false);
             }
             CallCommandClient.getInstance().setSystemBarNavigationEnabled(true);
@@ -269,7 +282,7 @@ public class InCallPresenter implements CallList.Listener {
         // Disable notification shade and soft navigation buttons
         if (newState.isIncoming()) {
             CallCommandClient.getInstance().setSystemBarNavigationEnabled(false);
-            if(mAccelerometerListener != null){
+            if (mAccelerometerListener != null) {
                 mAccelerometerListener.enableSensor(true);
             }
         }
@@ -457,7 +470,7 @@ public class InCallPresenter implements CallList.Listener {
         // (1) Attempt to answer a call
         if (incomingCall != null) {
             CallCommandClient.getInstance().answerCall(incomingCall.getCallId());
-            if(mAccelerometerListener != null)
+            if (mAccelerometerListener != null)
                 mAccelerometerListener.enableSensor(false);
             return true;
         }
@@ -650,6 +663,21 @@ public class InCallPresenter implements CallList.Listener {
             mInCallActivity = null;
         }
 
+        final PowerManager pm = (PowerManager) mContext.getSystemService(Context.POWER_SERVICE);
+        // If the screen is on, we'll prefer to not interrupt the user too much and slide in a card
+        if (pm.isScreenOn()) {
+            Intent intent = new Intent(mContext, InCallCardActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            mContext.startActivity(intent);
+        } else {
+            mStatusBarNotifier.updateNotificationAndLaunchIncomingCallUi(inCallState, mCallList);
+        }
+    }
+
+    /**
+     * Starts the incoming call Ui immediately, bypassing the card UI
+     */
+    public void startIncomingCallUi(InCallState inCallState) {
         mStatusBarNotifier.updateNotificationAndLaunchIncomingCallUi(inCallState, mCallList);
     }
 
